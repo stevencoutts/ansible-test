@@ -8,6 +8,11 @@
         name: resolvconf
         state: present
 
+    - name: Install ntp if not installed
+      apt:
+        name: ntp
+        state: present
+
     - name: Set DNS nameservers
       copy:
         dest: /etc/resolvconf/resolv.conf.d/head
