@@ -1,0 +1,45 @@
+---
+- name: Update Debian Servers using apt
+  hosts: servers
+  become: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Ensure needs-restarting is installed
+      apt:
+        name: needrestart
+        state: present
+
+    - name: Gather facts about available updates
+      command: apt list --upgradable
+      register: upgradable_packages
+
+    - name: Display list of upgradable packages
+      debug:
+        var: upgradable_packages.stdout_lines
+
+    - block:
+        - name: Update package lists
+          apt:
+            update_cache: yes
+            cache_valid_time: 3600
+          when: upgradable_packages.stdout_lines|length > 0
+
+        - name: Upgrade packages
+          apt:
+            upgrade: dist
+            force: yes
+          when: upgradable_packages.stdout_lines|length > 0
+
+        - name: Check if reboot is required
+          shell: needrestart
+          register: needs_reboot
+          changed_when: needs_reboot.stdout == '0'
+
+        - name: Reboot if required
+          reboot:
+            msg: "Rebooting after update"
+            connect_timeout: 120
+            post_reboot_delay: 300
+            test_command: whoami
+          when: needs_reboot.stdout != '0'
