@@ -1,0 +1,33 @@
+---
+- name: Configure NTP settings on Debian servers
+  hosts: all
+  become: yes
+  vars:
+    ntp_servers:
+      - ntp0.zen.co.uk
+      - ntp1.zen.co.uk
+
+  tasks:
+    - name: Ensure NTP package is installed
+      apt:
+        name: ntp
+        state: present
+
+    - name: Configure NTP servers in /etc/ntp.conf
+      lineinfile:
+        path: /etc/ntp.conf
+        regexp: '^server '
+        line: "server {{ item }}"
+        state: present
+      with_items: "{{ ntp_servers }}"
+
+    - name: Remove default NTP servers if present
+      lineinfile:
+        path: /etc/ntp.conf
+        regexp: '^pool [0-9]+\.debian.pool.ntp.org iburst'
+        state: absent
+
+    - name: Restart NTP service to apply changes
+      service:
+        name: ntp
+        state: restarted

@@ -5,7 +5,7 @@
   vars:
     ansible_python_interpreter: /usr/bin/python3
   tasks:
-    - name: Ensure needs-restarting is installed
+    - name: Ensure needrestart is installed
       apt:
         name: needrestart
         state: present
@@ -35,11 +35,3 @@
           shell: needrestart
           register: needs_reboot
           changed_when: needs_reboot.stdout == '0'
-
-        - name: Reboot if required
-          reboot:
-            msg: "Rebooting after update"
-            connect_timeout: 120
-            post_reboot_delay: 300
-            test_command: whoami
-          when: needs_reboot.stdout != '0'
