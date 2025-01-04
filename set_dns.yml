@@ -2,16 +2,20 @@
 - name: Configure DNS servers using resolvconf on Debian hosts
   hosts: servers
   become: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
   tasks:
   - name: Install resolvconf if not installed
     apt:
       name: resolvconf
       state: present
+    when: inventory_hostname != "kore.couttsnet.com"
 
   - name: Install ntp if not installed
     apt:
       name: ntp
       state: present
+    when: inventory_hostname != "kore.couttsnet.com"
 
   - name: Set DNS nameservers
     copy:
@@ -21,7 +25,9 @@
         nameserver 2a02:8012:1df6:30::1
     notify:
     - reload resolvconf
+    when: inventory_hostname != "kore.couttsnet.com"
 
   handlers:
   - name: reload resolvconf
     command: resolvconf -u
+    when: inventory_hostname != "kore.couttsnet.com"
