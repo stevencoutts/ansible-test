@@ -3,25 +3,25 @@
   hosts: servers
   become: yes
   tasks:
-    - name: Install resolvconf if not installed
-      apt:
-        name: resolvconf
-        state: present
+  - name: Install resolvconf if not installed
+    apt:
+      name: resolvconf
+      state: present
 
-    - name: Install ntp if not installed
-      apt:
-        name: ntp
-        state: present
+  - name: Install ntp if not installed
+    apt:
+      name: ntp
+      state: present
 
-    - name: Set DNS nameservers
-      copy:
-        dest: /etc/resolvconf/resolv.conf.d/head
-        content: |
-          nameserver 10.100.30.1
-      notify:
-        - reload resolvconf
+  - name: Set DNS nameservers
+    copy:
+      dest: /etc/resolvconf/resolv.conf.d/head
+      content: |
+        nameserver 10.100.30.1
+        nameserver 2a02:8012:1df6:30::1
+    notify:
+    - reload resolvconf
 
   handlers:
-    - name: reload resolvconf
-      command: resolvconf -u
-
+  - name: reload resolvconf
+    command: resolvconf -u
