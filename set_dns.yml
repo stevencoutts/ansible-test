@@ -23,6 +23,7 @@
       content: |
         nameserver 10.100.30.1
         nameserver 2a02:8012:1df6:30::1
+        search couttsnet.com gazella-palermo.ts.net
     notify:
     - reload resolvconf
     when: inventory_hostname != "kore.couttsnet.com"
