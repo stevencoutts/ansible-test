@@ -4,46 +4,66 @@
   become: yes
   vars:
     ansible_python_interpreter: /usr/bin/python3
+
+  pre_tasks:
+    - name: Check available disk space
+      ansible.builtin.assert:
+        that: ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first > 524288000
+        fail_msg: "Less than 500MB free on /. Aborting."
+
   tasks:
-  - name: Ensure needrestart is installed
-    apt:
-      name: needrestart
-      state: present
+    - name: Ensure needrestart is installed
+      apt:
+        name: needrestart
+        state: present
 
-  - name: Gather facts about available updates
-    command: apt list --upgradable
-    register: upgradable_packages
-
-  - name: Display list of upgradable packages
-    debug:
-      var: upgradable_packages.stdout_lines
-
-  - block:
-    - name: Update package lists
+    - name: Update package cache
       apt:
         update_cache: yes
         cache_valid_time: 3600
-      when: upgradable_packages.stdout_lines|length > 0
 
-    - name: Upgrade packages
-      apt:
-        upgrade: dist
-        force: yes
-      when: upgradable_packages.stdout_lines|length > 0
+    - name: Check for upgradable packages
+      command: apt-get --simulate upgrade
+      register: simulate_upgrade
+      changed_when: false
 
-    - name: Restart services if required
-      command: needrestart -r a
+    - name: Display pending upgrades
+      debug:
+        msg: "{{ simulate_upgrade.stdout_lines }}"
 
-    - name: Check if a reboot is required.
-      ansible.builtin.stat:
-        path: /var/run/reboot-required
-        get_checksum: no
-      register: reboot_required_file
+    - block:
+        - name: Upgrade packages (safe)
+          apt:
+            upgrade: full
+          register: upgrade_result
 
-    - name: Reboot the server (if required).
-      ansible.builtin.reboot:
-      when: reboot_required_file.stat.exists == true
+        - name: Restart services non-interactively
+          command: needrestart -r a
+          environment:
+            NEEDRESTART_MODE: a
 
-    - name: Remove dependencies that are no longer required.
-      ansible.builtin.apt:
-        autoremove: yes
+        - name: Remove unused dependencies
+          ansible.builtin.apt:
+            autoremove: yes
+            autoclean: yes
+
+        - name: Check if reboot is required
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+            get_checksum: no
+          register: reboot_required_file
+
+        - name: Reboot if required
+          ansible.builtin.reboot:
+            msg: "Reboot triggered by Ansible after package update"
+            reboot_timeout: 300
+          when: reboot_required_file.stat.exists
+
+      rescue:
+        - name: Log upgrade failure
+          ansible.builtin.debug:
+            msg: "Upgrade failed on {{ inventory_hostname }}. Manual intervention may be required."
+
+        - name: Attempt to fix interrupted dpkg
+          command: dpkg --configure -a
+          ignore_errors: yes
