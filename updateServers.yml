@@ -55,8 +55,11 @@
         - name: Remove unused dependencies
           ansible.builtin.apt:
             autoremove: yes
-            autoclean: yes
             purge: yes
+
+        - name: Clean up obsolete package cache
+          ansible.builtin.apt:
+            autoclean: yes
 
     - name: Check if reboot is required
       ansible.builtin.stat:
