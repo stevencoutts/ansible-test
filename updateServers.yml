@@ -42,23 +42,6 @@
           environment:
             NEEDRESTART_MODE: a
 
-        - name: Remove unused dependencies
-          ansible.builtin.apt:
-            autoremove: yes
-            autoclean: yes
-
-        - name: Check if reboot is required
-          ansible.builtin.stat:
-            path: /var/run/reboot-required
-            get_checksum: no
-          register: reboot_required_file
-
-        - name: Reboot if required
-          ansible.builtin.reboot:
-            msg: "Reboot triggered by Ansible after package update"
-            reboot_timeout: 300
-          when: reboot_required_file.stat.exists
-
       rescue:
         - name: Log upgrade failure
           ansible.builtin.debug:
@@ -67,3 +50,22 @@
         - name: Attempt to fix interrupted dpkg
           command: dpkg --configure -a
           ignore_errors: yes
+
+      always:
+        - name: Remove unused dependencies
+          ansible.builtin.apt:
+            autoremove: yes
+            autoclean: yes
+            purge: yes
+
+    - name: Check if reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+        get_checksum: no
+      register: reboot_required_file
+
+    - name: Reboot if required
+      ansible.builtin.reboot:
+        msg: "Reboot triggered by Ansible after package update"
+        reboot_timeout: 300
+      when: reboot_required_file.stat.exists
