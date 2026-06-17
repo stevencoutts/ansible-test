@@ -1,0 +1,171 @@
+---
+# debian-disk-cleanup.yml
+#
+# Safe, idempotent disk-space cleanup for Debian servers.
+# Reports usage before and after, then reclaims space from the apt cache,
+# orphaned packages, the systemd journal, and other low-risk temporary cruft.
+#
+# Usage:
+#   Local host:   sudo ansible-playbook debian-disk-cleanup.yml -i localhost, -c local
+#   Remote hosts: ansible-playbook debian-disk-cleanup.yml -i inventory.ini
+#
+# Tunables (override with -e):
+#   journal_max_age=7d       keep this much journal history
+#   journal_max_size=200M    OR cap the journal at this size (size wins if set)
+#   apt_autoremove=true      remove orphaned dependencies
+#   clean_old_logs=true      delete rotated logs (*.gz, *.1, *.old) under /var/log
+#   clean_tmp=true           remove files in /tmp and /var/tmp older than tmp_age
+#   tmp_age=7d               age threshold for /tmp and /var/tmp cleanup
+#
+# Nothing here touches application data or live config. It only removes
+# regenerable caches, orphaned packages, surplus journal history, and old temp files.
+
+- name: Debian disk-space cleanup
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    journal_max_age: "7d"
+    journal_max_size: ""          # e.g. "200M"; if set, takes priority over age
+    apt_autoremove: true
+    clean_old_logs: true
+    clean_tmp: true
+    tmp_age: "7d"
+
+  pre_tasks:
+    - name: Fail early if host is not Debian
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == "Debian"
+        fail_msg: "This playbook is for Debian-family hosts only (found {{ ansible_facts['os_family'] }})."
+        quiet: true
+
+  tasks:
+    - name: Capture disk usage on / before cleanup
+      ansible.builtin.command: df -h /
+      register: df_before
+      changed_when: false
+
+    - name: Show disk usage before
+      ansible.builtin.debug:
+        msg: "{{ df_before.stdout_lines }}"
+
+    # --- APT cache and orphaned packages -------------------------------------
+
+    - name: Clean apt cache (apt-get clean)
+      ansible.builtin.apt:
+        autoclean: true        # remove obsolete .debs first
+      register: apt_autoclean
+
+    - name: Empty the apt archives cache
+      ansible.builtin.command: apt-get clean
+      changed_when: false      # apt-get clean has no reliable changed signal
+
+    - name: Autoremove orphaned packages and their config
+      ansible.builtin.apt:
+        autoremove: true
+        purge: true
+      when: apt_autoremove | bool
+
+    # --- systemd journal ------------------------------------------------------
+
+    - name: Report current journal disk usage
+      ansible.builtin.command: journalctl --disk-usage
+      register: journal_usage
+      changed_when: false
+      failed_when: false
+
+    - name: Show journal usage
+      ansible.builtin.debug:
+        msg: "{{ journal_usage.stdout | default('journald not present') }}"
+
+    - name: Vacuum journal by size
+      ansible.builtin.command: "journalctl --vacuum-size={{ journal_max_size }}"
+      when: journal_max_size | length > 0
+      changed_when: true
+
+    - name: Vacuum journal by age
+      ansible.builtin.command: "journalctl --vacuum-time={{ journal_max_age }}"
+      when: journal_max_size | length == 0
+      changed_when: true
+
+    # --- Rotated logs ---------------------------------------------------------
+
+    - name: Find rotated/compressed logs under /var/log
+      ansible.builtin.find:
+        paths: /var/log
+        recurse: true
+        patterns:
+          - "*.gz"
+          - "*.old"
+          - "*.[0-9]"
+          - "*.[0-9].gz"
+        use_regex: false
+      register: rotated_logs
+      when: clean_old_logs | bool
+
+    - name: Delete rotated/compressed logs
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ rotated_logs.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when: clean_old_logs | bool
+
+    # --- Temp directories -----------------------------------------------------
+
+    - name: Find old files in /tmp and /var/tmp
+      ansible.builtin.find:
+        paths:
+          - /tmp
+          - /var/tmp
+        age: "{{ tmp_age }}"
+        recurse: true
+        file_type: any
+      register: tmp_files
+      when: clean_tmp | bool
+
+    - name: Delete old temp files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ tmp_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when: clean_tmp | bool
+
+    # --- Optional: stale crash dumps -----------------------------------------
+
+    - name: Check for crash dump directory
+      ansible.builtin.stat:
+        path: /var/crash
+      register: crash_dir
+
+    - name: Find crash dumps
+      ansible.builtin.find:
+        paths: /var/crash
+        recurse: true
+        file_type: any
+      register: crash_files
+      when: crash_dir.stat.exists and crash_dir.stat.isdir
+
+    - name: Remove crash dumps
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ crash_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when: crash_dir.stat.exists and crash_dir.stat.isdir
+
+  post_tasks:
+    - name: Capture disk usage on / after cleanup
+      ansible.builtin.command: df -h /
+      register: df_after
+      changed_when: false
+
+    - name: Show disk usage after
+      ansible.builtin.debug:
+        msg: "{{ df_after.stdout_lines }}"
